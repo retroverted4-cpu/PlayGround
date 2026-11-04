@@ -11,7 +11,9 @@ const canvas = document.getElementById("game");
 const stage = document.getElementById("stage");
 const stageWrap = document.querySelector(".stage-wrap");
 const rotateOverlay = document.getElementById("rotate");
-const rotateDismissed = { value: sessionStorage.getItem("bloonRotateDismissed") === "1" };
+let rotateWasDismissed = false;
+try { rotateWasDismissed = sessionStorage.getItem("bloonRotateDismissed") === "1"; } catch {}
+const rotateDismissed = { value: rotateWasDismissed };
 const track = new Track(MAP.waypoints, 30);
 const renderer = new Renderer(canvas, track, MAP.pathWidth);
 const game = new Game(track, renderer.blockers);
@@ -150,6 +152,7 @@ function toWorld(e) {
 }
 
 canvas.addEventListener("pointerdown", (e) => {
+  if (e.button !== 0) return;
   e.preventDefault();
   audio.unlock();
   if (ui.overlayOpen) return;
@@ -190,14 +193,18 @@ window.addEventListener("keydown", (e) => {
   const key = e.key.toLowerCase();
 
   if (key === "escape") {
-    if (game.placing) {
-      game.disarmTower();
-      game.emit("ui");
-    } else if (game.selected) {
-      game.selected = null;
-      game.emit("deselect");
-    } else if (ui.overlayMode === "pause") {
+    if (ui.overlayMode === "pause") {
       ui.togglePause();
+    } else if (ui.overlayMode === "help") {
+      ui.closeHelp();
+    } else if (!ui.overlayOpen) {
+      if (game.placing) {
+        game.disarmTower();
+        game.emit("ui");
+      } else if (game.selected) {
+        game.selected = null;
+        game.emit("deselect");
+      }
     }
     return;
   }

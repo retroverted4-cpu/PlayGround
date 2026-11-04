@@ -121,9 +121,13 @@ export class UI {
       if (!action) return;
       if (action === "play") {
         this.hideOverlay();
-        this.game.startGame();
-        this.game.emit("ui");
-        this.hooks.onUnlock?.();
+        if (this.game.over || this.game.victory) {
+          this.hooks.onRestart?.();
+        } else {
+          this.game.startGame();
+          this.game.emit("ui");
+          this.hooks.onUnlock?.();
+        }
       } else if (action === "help") {
         this.showHelp();
       } else if (action === "resume") {
@@ -134,17 +138,7 @@ export class UI {
         this.hideOverlay();
         this.hooks.onRestart?.();
       } else if (action === "close-help") {
-        this.hideOverlay();
-        if (!this.helpWasPaused) this.game.paused = false;
-        this.helpWasPaused = false;
-        this.game.emit("ui");
-      } else if (action === "close-help-paused") {
-        this.hideOverlay();
-        this.game.emit("ui");
-      } else if (action === "resume-help") {
-        this.hideOverlay();
-        this.game.paused = false;
-        this.game.emit("ui");
+        this.closeHelp();
       }
     });
   }
@@ -187,6 +181,20 @@ export class UI {
     this.game.emit("ui");
   }
 
+  closeHelp() {
+    if (this.overlayMode !== "help") return;
+    this.hideOverlay();
+    if (this.helpWasPaused && this.game.started && !this.game.over && !this.game.victory) {
+      this.game.paused = true;
+      this.el.pause.classList.add("on");
+      this.showPause();
+    } else {
+      this.game.paused = false;
+    }
+    this.helpWasPaused = false;
+    this.game.emit("ui");
+  }
+
   showIntro() {
     const best = this.game.bestRound > 0 ? `<p class="lede" style="margin-top:14px;color:#ffcf5c;font-weight:800;font-size:12px">Your best: wave ${this.game.bestRound}</p>` : "";
     this.showOverlay(`
@@ -214,6 +222,7 @@ export class UI {
     this.helpWasPaused = this.game.paused;
     if (this.game.started && !this.game.over && !this.game.victory) this.game.paused = true;
     const inGame = this.game.started && !this.game.over && !this.game.victory;
+    const finished = this.game.over || this.game.victory;
     this.showOverlay(`
       <div class="panel">
         <p class="eyebrow">Field Manual</p>
@@ -227,7 +236,7 @@ export class UI {
           <div><b>Hotkeys</b>1–9 select towers. Esc cancels. S sells. U upgrades.</div>
           <div><b>Bosses</b>MOAB blimps arrive from wave 25. They hit hard and split.</div>
         </div>
-        <button class="big-btn" data-action="${inGame ? "close-help" : "play"}">${inGame ? "Back to the meadow" : "Start Defending"}</button>
+        <button class="big-btn" data-action="${inGame ? "close-help" : "play"}">${inGame ? "Back to the meadow" : finished ? "Try Again" : "Start Defending"}</button>
       </div>
     `, "help");
   }
@@ -239,6 +248,7 @@ export class UI {
         <h2>Paused</h2>
         <p class="lede">The bloons are politely waiting. Upgrade something while you're here.</p>
         <button class="big-btn" data-action="resume">Resume</button>
+        <button class="ghost-btn" data-action="help">How to Play</button>
         <button class="ghost-btn" data-action="restart">Restart Run</button>
       </div>
     `, "pause");
@@ -308,6 +318,9 @@ export class UI {
     if (g.roundActive) {
       startHTML = `<svg viewBox="0 0 24 24"><path d="M8 5.5v13l10-6.5z" fill="currentColor"/></svg><span>Wave in Progress</span>`;
       disabled = true;
+    } else if (g.over) {
+      startHTML = `<span>Run Over</span>`;
+      disabled = true;
     } else if (g.round > MAX_ROUND) {
       startHTML = `<span>All Waves Cleared</span>`;
       disabled = true;
@@ -318,15 +331,17 @@ export class UI {
     if (this.cache.start !== startSig) {
       this.el.start.innerHTML = startHTML;
       this.el.start.disabled = disabled;
-      this.el.start.classList.toggle("pulse", !disabled && !g.roundActive && g.started && !this.overlayOpen);
       this.cache.start = startSig;
     }
+    this.el.start.classList.toggle("pulse", !disabled && !g.roundActive && g.started && !this.overlayOpen && !g.over && !g.victory);
 
     const label = g.roundActive
       ? `Wave ${g.round} · ${g.balloons.length + (g.spawnQueue.length - g.spawnIndex)} left`
-      : g.started
-        ? `Wave ${Math.min(g.round, MAX_ROUND)} / ${MAX_ROUND}`
-        : "Get ready";
+      : g.over
+        ? `Run Over · Wave ${Math.min(g.round, MAX_ROUND)}`
+        : g.started
+          ? `Wave ${Math.min(g.round, MAX_ROUND)} / ${MAX_ROUND}`
+          : "Get ready";
     if (this.cache.label !== label) {
       this.el.roundLabel.textContent = label;
       this.cache.label = label;
@@ -355,7 +370,8 @@ export class UI {
     // Placement hint.
     if (g.placing) {
       const def = TOWER_BY_ID[g.placing];
-      const text = `Placing ${def.name} · $${def.cost} — tap the grass · Esc to cancel`;
+      const cancelHint = window.matchMedia?.("(pointer: coarse)")?.matches ? "tap the card again to cancel" : "Esc to cancel";
+      const text = `Placing ${def.name} · $${def.cost} — tap the grass · ${cancelHint}`;
       if (this.el.hint.textContent !== text) this.el.hint.textContent = text;
       this.el.hint.classList.remove("hidden");
     } else if (!this.el.hint.classList.contains("hidden")) {
@@ -400,7 +416,12 @@ export class UI {
         this.renderer.drawTowerBody(ctx, t.def.id, t.level, -Math.PI / 2 + 0.2, 0.6, 0, 0, 1.15);
       }
     }
-    // Live affordability / refund.
+    // Live affordability / refund / pop count.
+    const pops = this.el.inspector.querySelector(".ins-pops");
+    if (pops) {
+      const txt = `Tier ${t.level}${t.level >= 3 ? " · Max" : ""} · ${t.kills} pops`;
+      if (pops.textContent !== txt) pops.textContent = txt;
+    }
     const upBtn = this.el.inspector.querySelector('[data-action="upgrade"]');
     if (upBtn) {
       const next = t.def.upgrades[t.level];
@@ -442,7 +463,7 @@ export class UI {
         <canvas class="ins-icon" width="88" height="88"></canvas>
         <div class="ins-title">
           <h3>${t.def.name}</h3>
-          <p>Tier ${t.level}${t.level >= 3 ? " · Max" : ""} · ${t.kills} pops</p>
+          <p class="ins-pops">Tier ${t.level}${t.level >= 3 ? " · Max" : ""} · ${t.kills} pops</p>
         </div>
         <button class="ins-close" data-action="close" aria-label="Close">×</button>
       </div>

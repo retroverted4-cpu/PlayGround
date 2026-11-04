@@ -1645,12 +1645,14 @@ export class Renderer {
   drawProjectile(ctx, p, time) {
     if (p.kind === "bomb") {
       const pos = bombPos(p);
+      const f = Math.min(1, p.t);
+      const groundY = p.sy + (p.ty - p.sy) * f + 8;
       ctx.save();
-      ctx.translate(pos.x, pos.y);
       ctx.fillStyle = "rgba(20,40,16,.22)";
       ctx.beginPath();
-      ctx.ellipse(0, p.arcHeight + 8, 5, 2.4, 0, 0, Math.PI * 2);
+      ctx.ellipse(pos.x, groundY, 5, 2.4, 0, 0, Math.PI * 2);
       ctx.fill();
+      ctx.translate(pos.x, pos.y);
       ctx.rotate(p.spin);
       ctx.fillStyle = "#232a33";
       ctx.beginPath();

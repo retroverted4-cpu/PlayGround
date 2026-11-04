@@ -22,7 +22,9 @@ export class Game {
     this.cash = START_CASH;
     this.lives = START_LIVES;
     this.round = 1;
-    this.bestRound = Number(localStorage.getItem("bloonPatrolBest") || 0);
+    let storedBest = 0;
+    try { storedBest = Number(localStorage.getItem("bloonPatrolBest") || 0); } catch {}
+    this.bestRound = Number.isFinite(storedBest) ? Math.min(MAX_ROUND, Math.max(0, Math.floor(storedBest))) : 0;
     this.balloons = [];
     this.towers = [];
     this.projectiles = [];
@@ -604,8 +606,13 @@ export class Game {
       for (const b of targets) {
         if (b.dead) continue;
         if (p.boomerang) {
-          const last = p.hitCooldowns.get(b.id) ?? -1;
-          if (this.time - last < 0.28) continue;
+          const seen = p.hits.has(b.id);
+          // A boomerang can strike the same bloon again on the return trip,
+          // but it can only pass through `pierce` distinct bloons per throw.
+          if (seen) {
+            const last = p.hitCooldowns.get(b.id) ?? -1;
+            if (this.time - last < 0.28) continue;
+          } else if (p.hits.size >= p.pierce) continue;
         } else if (p.hits.has(b.id)) continue;
         const reach = (b.def.big ? b.radius * 1.35 : b.radius) + p.r;
         if ((b.x - p.x) ** 2 + (b.y - p.y) ** 2 > reach * reach) continue;
@@ -620,6 +627,7 @@ export class Game {
         this.damageBalloon(b, p.damage, p.owner);
         this.burst(b.x, b.y, b.def.color, 3, 6);
         if (p.boomerang) {
+          p.hits.add(b.id);
           p.hitCooldowns.set(b.id, this.time);
         } else {
           p.hits.add(b.id);

@@ -132,7 +132,7 @@ export const TOWERS = [
     upgrades: [
       { name: "Permafrost", cost: 300, desc: "Slow lasts 1s longer", mods: { slowDur: 1, damage: 0.5 } },
       { name: "Deep Freeze", cost: 520, desc: "Much stronger slow", mods: { slow: 0.18, slowDur: 0.6 } },
-      { name: "Absolute Zero", cost: 1050, desc: "Freezes the whole track", mods: { range: 75, slow: 0.1, cooldownMul: 0.65 } },
+      { name: "Absolute Zero", cost: 1050, desc: "Wide pulse, stronger chill", mods: { range: 75, slow: 0.1, cooldownMul: 0.65 } },
     ],
   },
   {

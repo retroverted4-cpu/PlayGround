@@ -43,7 +43,7 @@ body {
   width: 100%;
   max-width: 1500px;
   margin: 0 auto;
-  padding: 10px clamp(8px, 1.6vw, 20px) max(8px, env(safe-area-inset-bottom));
+  padding: max(10px, env(safe-area-inset-top)) max(clamp(8px, 1.6vw, 20px), env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(clamp(8px, 1.6vw, 20px), env(safe-area-inset-left));
   gap: 8px;
 }
 
@@ -801,7 +801,7 @@ body {
 }
 
 @media (max-width: 700px) {
-  #app { padding: 6px 6px max(6px, env(safe-area-inset-bottom)); gap: 6px; }
+  #app { padding: max(6px, env(safe-area-inset-top)) max(6px, env(safe-area-inset-right)) max(6px, env(safe-area-inset-bottom)) max(6px, env(safe-area-inset-left)); gap: 6px; }
   .topbar { padding: 2px 2px; flex-wrap: wrap; }
   .brand-copy h1 { font-size: 15px; }
   .brand-mark { width: 34px; height: 34px; }
@@ -822,8 +822,8 @@ body {
   .ins-stats { gap: 4px; margin: 8px 0; }
   .shop { border-radius: 13px; padding: 4px 6px 6px; }
   .shop-hint { display: none; }
-  .tower-card { flex: 0 0 88px; min-width: 88px; max-width: 96px; padding: 5px 6px 5px 5px; gap: 5px; }
-  .tower-card canvas { width: 32px; height: 32px; }
+  .tower-card { flex: 0 0 112px; min-width: 112px; max-width: 120px; padding: 5px 6px 5px 5px; gap: 5px; }
+  .tower-card canvas { width: 30px; height: 30px; }
   .tower-card .tc-name { font-size: 8.8px; }
   .tower-card .price { font-size: 9.5px; }
   .tower-card .key { display: none; }
@@ -833,7 +833,7 @@ body {
 }
 
 @media (max-height: 620px) and (orientation: landscape) {
-  #app { padding: 4px 8px; gap: 4px; }
+  #app { padding: max(4px, env(safe-area-inset-top)) max(8px, env(safe-area-inset-right)) max(4px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left)); gap: 4px; }
   .topbar { padding: 1px 4px; }
   .brand-mark { width: 32px; height: 32px; }
   .brand-copy h1 { font-size: 14px; }
@@ -842,9 +842,39 @@ body {
   .icon-btn { width: 30px; height: 30px; }
   .shop { padding: 3px 6px 4px; }
   .shop-head { display: none; }
-  .tower-card { padding: 3px 6px 3px 3px; }
-  .tower-card canvas { width: 28px; height: 28px; }
+  .tower-card { padding: 3px 5px 3px 3px; gap: 4px; }
+  .tower-card canvas { width: 26px; height: 26px; }
   .stage-top { top: 5px; }
+  /* Short landscape stages can't fit the inspector without covering the
+     start-wave controls, so dock it over the lower-right corner instead. */
+  .inspector {
+    position: fixed;
+    right: max(8px, env(safe-area-inset-right));
+    bottom: calc(8px + env(safe-area-inset-bottom));
+    width: min(248px, calc(100vw - 16px));
+    max-height: calc(100dvh - 76px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    z-index: 15;
+  }
+}
+
+/* Portrait phones: dock the tower inspector to the bottom of the viewport.
+   The 16:9 stage is short in portrait, so anchoring inside it clipped the
+   panel and blocked the start-wave button. */
+@media (max-width: 700px) and (orientation: portrait) {
+  .inspector {
+    position: fixed;
+    left: max(8px, env(safe-area-inset-left));
+    right: max(8px, env(safe-area-inset-right));
+    bottom: calc(8px + env(safe-area-inset-bottom));
+    width: auto;
+    max-height: min(60vh, 420px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 10px 12px 12px;
+    z-index: 15;
+  }
 }
 
 @media (max-width: 480px) {

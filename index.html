@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<meta name="theme-color" content="#111d16" />
+<title>Bloon Patrol — Tower Defense</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 74'%3E%3Cellipse cx='32' cy='28' rx='23' ry='26' fill='%23ff525f'/%3E%3Cellipse cx='24' cy='18' rx='7' ry='10' fill='%23ffb4b9'/%3E%3Cpath d='M26 52 L32 60 L38 52 Z' fill='%23c92f3d'/%3E%3Cpath d='M32 60 q9 8 4 12' stroke='%23e9d8bb' stroke-width='2' fill='none'/%3E%3C/svg%3E" />
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<div id="app">
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 40 46" width="30" height="35">
+          <ellipse cx="20" cy="17" rx="14" ry="16" fill="#ff5d68"/>
+          <ellipse cx="15" cy="11" rx="4.5" ry="6" fill="#ffb3b8" opacity=".85"/>
+          <path d="M16 32 L20 37 L24 32 Z" fill="#c93845"/>
+          <path d="M20 37 q6 5 3 9" stroke="#e9d8bb" stroke-width="1.6" fill="none" opacity=".8"/>
+        </svg>
+      </div>
+      <div class="brand-copy">
+        <h1>BLOON PATROL</h1>
+        <p>Tower Defense</p>
+      </div>
+    </div>
+
+    <div class="hud">
+      <div class="stat" title="Lives">
+        <svg class="ic" viewBox="0 0 24 24"><path d="M12 21s-8-4.9-8-11a4.6 4.6 0 0 1 8-3 4.6 4.6 0 0 1 8 3c0 6.1-8 11-8 11Z" fill="#ff5c68"/></svg>
+        <b id="hud-lives">100</b>
+      </div>
+      <div class="stat" title="Cash">
+        <svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9.5" fill="#ffcf5c"/><circle cx="12" cy="12" r="7.3" fill="none" stroke="#d99723" stroke-width="1.3"/><path d="M12 7.4v9.2M9.7 9.5h4a1.6 1.6 0 0 1 0 3.2h-3.4a1.6 1.6 0 0 0 0 3.2h4" stroke="#9a6410" stroke-width="1.5" fill="none" stroke-linecap="round"/></svg>
+        <b id="hud-cash">700</b>
+      </div>
+      <div class="stat round-stat" title="Round">
+        <svg class="ic" viewBox="0 0 24 24"><path d="M6 21V4m0 1h11l-2.5 3.5L17 12H6" fill="none" stroke="#9fe870" stroke-width="2.1" stroke-linejoin="round" stroke-linecap="round"/></svg>
+        <b id="hud-round">1</b><span class="muted">/ 40</span>
+      </div>
+    </div>
+
+    <div class="controls">
+      <button id="btn-speed" class="icon-btn wide" title="Game speed (F)" aria-label="Game speed">1×</button>
+      <button id="btn-pause" class="icon-btn" title="Pause (P)" aria-label="Pause">
+        <svg viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16" rx="1.2" fill="currentColor"/><rect x="14" y="4" width="4" height="16" rx="1.2" fill="currentColor"/></svg>
+      </button>
+      <button id="btn-sound" class="icon-btn" title="Sound" aria-label="Toggle sound">
+        <svg viewBox="0 0 24 24"><path d="M4 9.5h3.4L12 5.5v13L7.4 14.5H4z" fill="currentColor"/><path class="sound-wave" d="M15.5 8.5a5 5 0 0 1 0 7M18 6a8.5 8.5 0 0 1 0 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      </button>
+      <button id="btn-help" class="icon-btn" title="How to play" aria-label="How to play">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path d="M9.4 9.2a2.7 2.7 0 1 1 3.9 2.5c-.9.5-1.3 1-1.3 1.9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="17" r="1.25" fill="currentColor"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <main class="stage-wrap">
+    <div class="stage" id="stage">
+      <canvas id="game" aria-label="Bloon Patrol game board"></canvas>
+
+      <div class="stage-top">
+        <div class="round-pill">
+          <span id="round-label">Wave 1</span>
+          <div class="progress"><i id="round-progress"></i></div>
+        </div>
+        <div class="stage-actions">
+          <label class="auto-toggle" title="Automatically start the next wave">
+            <input type="checkbox" id="auto-start" />
+            <span>Auto</span>
+          </label>
+          <button id="btn-start" class="start-btn">
+            <svg viewBox="0 0 24 24"><path d="M8 5.5v13l10-6.5z" fill="currentColor"/></svg>
+            <span>Start Wave</span>
+          </button>
+        </div>
+      </div>
+
+      <div id="place-hint" class="place-hint hidden"></div>
+      <div id="toast" class="toast"></div>
+
+      <aside id="inspector" class="inspector hidden" aria-label="Tower details"></aside>
+
+      <div id="overlay" class="overlay hidden"></div>
+
+      <div class="watermark">BLOON PATROL</div>
+    </div>
+  </main>
+
+  <footer class="shop">
+    <div class="shop-head">
+      <span class="shop-title">Armory</span>
+      <span class="shop-hint" id="shop-hint">Select a tower, then tap the map.</span>
+    </div>
+    <div class="shop-scroll" id="shop"></div>
+  </footer>
+</div>
+
+<div id="rotate" class="rotate-overlay hidden">
+  <div class="rotate-card">
+    <div class="rotate-icon" aria-hidden="true">
+      <svg viewBox="0 0 64 64" width="58" height="58">
+        <rect x="19" y="7" width="26" height="46" rx="7" fill="none" stroke="#ffcf5c" stroke-width="3"/>
+        <rect x="24" y="13" width="16" height="31" rx="2" fill="rgba(255,207,92,.18)"/>
+        <circle cx="32" cy="48" r="2.2" fill="#ffcf5c"/>
+        <path d="M52 18a20 20 0 0 1 5 12" fill="none" stroke="#8ce06b" stroke-width="3" stroke-linecap="round"/>
+        <path d="M55 13l2 7-7-1" fill="none" stroke="#8ce06b" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </div>
+    <p class="eyebrow">A wider meadow</p>
+    <h2>Turn it sideways</h2>
+    <p>Bloon Patrol is a wide-open battlefield. Rotate your phone for a bigger board and roomier tower buttons.</p>
+    <button id="btn-play-anyway" class="big-btn">Play anyway</button>
+  </div>
+</div>
+
+<script type="module" src="src/main.js"></script>
+</body>
+</html>

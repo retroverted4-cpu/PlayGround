@@ -1,5 +1,3 @@
-import { PATH_ANCHORS } from './data.js';
-
 function lerp(a, b, t) {
   return a + (b - a) * t;
 }
@@ -22,33 +20,64 @@ function chaikin(points, iterations = 3) {
   return current;
 }
 
-export const PATH_POLY = chaikin(PATH_ANCHORS, 3);
-export const PATH_LENGTHS = [];
-
-let total = 0;
-for (let i = 0; i < PATH_POLY.length - 1; i += 1) {
-  const a = PATH_POLY[i];
-  const b = PATH_POLY[i + 1];
-  total += Math.hypot(b.x - a.x, b.y - a.y);
-  PATH_LENGTHS.push(total);
+export function createPath(anchors, iterations = 3) {
+  const poly = chaikin(anchors, iterations);
+  const lengths = [];
+  let total = 0;
+  for (let i = 0; i < poly.length - 1; i += 1) {
+    const a = poly[i];
+    const b = poly[i + 1];
+    total += Math.hypot(b.x - a.x, b.y - a.y);
+    lengths.push(total);
+  }
+  return { poly, lengths, total };
 }
 
-export const PATH_TOTAL = total;
+let paths = [];
 
-export function pathPoint(distance, out = {}) {
-  const d = Math.max(0, Math.min(PATH_TOTAL - 0.0001, distance));
+export function setPaths(anchorSets) {
+  paths = anchorSets.map((anchors) => createPath(anchors));
+  return paths;
+}
+
+export function getPaths() {
+  return paths;
+}
+
+export function getPathCount() {
+  return paths.length;
+}
+
+export function getPathTotal(track = 0) {
+  return paths[track]?.total || 0;
+}
+
+export function pathPoint(track, distance, out = {}) {
+  const path = paths[track] || paths[0];
+  if (!path) {
+    out.x = 0;
+    out.y = 0;
+    out.tx = 1;
+    out.ty = 0;
+    out.nx = 0;
+    out.ny = 1;
+    out.angle = 0;
+    return out;
+  }
+  const total = path.total;
+  const d = Math.max(0, Math.min(total - 0.0001, distance));
   let lo = 0;
-  let hi = PATH_LENGTHS.length - 1;
+  let hi = path.lengths.length - 1;
   while (lo < hi) {
     const mid = (lo + hi) >> 1;
-    if (PATH_LENGTHS[mid] < d) lo = mid + 1;
+    if (path.lengths[mid] < d) lo = mid + 1;
     else hi = mid;
   }
   const index = Math.max(0, lo);
-  const a = PATH_POLY[index];
-  const b = PATH_POLY[Math.min(PATH_POLY.length - 1, index + 1)];
-  const start = index === 0 ? 0 : PATH_LENGTHS[index - 1];
-  const length = Math.max(0.0001, PATH_LENGTHS[index] - start);
+  const a = path.poly[index];
+  const b = path.poly[Math.min(path.poly.length - 1, index + 1)];
+  const start = index === 0 ? 0 : path.lengths[index - 1];
+  const length = Math.max(0.0001, path.lengths[index] - start);
   const t = Math.max(0, Math.min(1, (d - start) / length));
   out.x = lerp(a.x, b.x, t);
   out.y = lerp(a.y, b.y, t);
@@ -58,12 +87,6 @@ export function pathPoint(distance, out = {}) {
   out.ny = out.tx;
   out.angle = Math.atan2(out.ty, out.tx);
   return out;
-}
-
-const scratch = {};
-
-export function pointAt(distance) {
-  return pathPoint(distance, scratch);
 }
 
 function segmentDistance(px, py, ax, ay, bx, by) {
@@ -76,13 +99,15 @@ function segmentDistance(px, py, ax, ay, bx, by) {
   return Math.hypot(px - (ax + dx * t), py - (ay + dy * t));
 }
 
-export function distanceToPath(x, y) {
+export function distanceToPaths(x, y) {
   let best = Infinity;
-  for (let i = 0; i < PATH_POLY.length - 1; i += 1) {
-    const a = PATH_POLY[i];
-    const b = PATH_POLY[i + 1];
-    const d = segmentDistance(x, y, a.x, a.y, b.x, b.y);
-    if (d < best) best = d;
+  for (const path of paths) {
+    for (let i = 0; i < path.poly.length - 1; i += 1) {
+      const a = path.poly[i];
+      const b = path.poly[i + 1];
+      const d = segmentDistance(x, y, a.x, a.y, b.x, b.y);
+      if (d < best) best = d;
+    }
   }
   return best;
 }
@@ -90,25 +115,30 @@ export function distanceToPath(x, y) {
 export function closestPathInfo(x, y) {
   let best = Infinity;
   let bestDistance = 0;
-  let running = 0;
-  for (let i = 0; i < PATH_POLY.length - 1; i += 1) {
-    const a = PATH_POLY[i];
-    const b = PATH_POLY[i + 1];
-    const dx = b.x - a.x;
-    const dy = b.y - a.y;
-    const lengthSq = dx * dx + dy * dy;
-    const length = Math.sqrt(lengthSq);
-    if (length < 0.0001) continue;
-    let t = ((x - a.x) * dx + (y - a.y) * dy) / lengthSq;
-    t = Math.max(0, Math.min(1, t));
-    const qx = a.x + dx * t;
-    const qy = a.y + dy * t;
-    const d = Math.hypot(x - qx, y - qy);
-    if (d < best) {
-      best = d;
-      bestDistance = running + length * t;
+  let bestTrack = 0;
+  for (let track = 0; track < paths.length; track += 1) {
+    const path = paths[track];
+    let running = 0;
+    for (let i = 0; i < path.poly.length - 1; i += 1) {
+      const a = path.poly[i];
+      const b = path.poly[i + 1];
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const lengthSq = dx * dx + dy * dy;
+      const length = Math.sqrt(lengthSq);
+      if (length < 0.0001) continue;
+      let t = ((x - a.x) * dx + (y - a.y) * dy) / lengthSq;
+      t = Math.max(0, Math.min(1, t));
+      const qx = a.x + dx * t;
+      const qy = a.y + dy * t;
+      const d = Math.hypot(x - qx, y - qy);
+      if (d < best) {
+        best = d;
+        bestDistance = running + length * t;
+        bestTrack = track;
+      }
+      running += length;
     }
-    running += length;
   }
-  return { distance: best, pathDistance: bestDistance };
+  return { distance: best, pathDistance: bestDistance, track: bestTrack };
 }

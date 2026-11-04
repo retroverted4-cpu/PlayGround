@@ -1,9 +1,10 @@
 import {
   W, H, TOTAL_ROUNDS, BLOONS, BLOON_ORDER, TOWERS, TOWER_ORDER, TARGET_MODES,
-  getWave, waveThreat, difficultyFor,
+  getWave, waveThreat, difficultyFor, MAPS, MAP_ORDER, MAP_DIFFICULTIES, getMap,
 } from './data.js';
 import {
-  PATH_POLY, PATH_TOTAL, pathPoint, distanceToPath, closestPathInfo,
+  setPaths, getPaths, getPathCount, getPathTotal, pathPoint, distanceToPaths,
+  closestPathInfo, createPath,
 } from './path.js';
 import { Sound } from './audio.js';
 
@@ -32,9 +33,10 @@ function loadSettings() {
       sound: parsed.sound !== false,
       autoStart: parsed.autoStart !== false,
       best: Number(parsed.best) || 0,
+      map: MAPS[parsed.map] ? parsed.map : 'meadow',
     };
   } catch {
-    return { sound: true, autoStart: true, best: 0 };
+    return { sound: true, autoStart: true, best: 0, map: 'meadow' };
   }
 }
 
@@ -44,12 +46,15 @@ function saveSettings() {
       sound: settings.sound,
       autoStart: settings.autoStart,
       best: settings.best,
+      map: settings.map,
     }));
   } catch { /* Storage can be unavailable in private mode. */ }
 }
 
 const settings = loadSettings();
 const sound = new Sound(settings.sound);
+let currentMap = getMap(settings.map);
+setPaths(currentMap.tracks);
 
 const canvas = $('#gameCanvas');
 const context = canvas.getContext('2d');
@@ -110,6 +115,24 @@ const dom = {
   bannerTitle: $('#bannerTitle'),
   best: $('#bestValue'),
   mapDifficulty: $('#mapDifficulty'),
+  mapName: $('#mapName'),
+  mapBtn: $('#mapBtn'),
+  brandMapName: $('#brandMapName'),
+  mapDialog: $('#mapDialog'),
+  mapClose: $('#mapClose'),
+  mapGrid: $('#mapGrid'),
+  mapStartBtn: $('#mapStartBtn'),
+  mapStartLabel: $('#mapStartLabel'),
+  mapSelectionNote: $('#mapSelectionNote'),
+  sandboxBtn: $('#sandboxBtn'),
+  sandboxBar: $('#sandboxBar'),
+  sandboxBloons: $('#sandboxBloons'),
+  sandboxCash: $('#sandboxCash'),
+  sandboxClear: $('#sandboxClear'),
+  sandboxExit: $('#sandboxExit'),
+  pauseTitle: $('#pauseTitle'),
+  pauseCopy: $('#pauseCopy'),
+  boardCta: $('#boardCta'),
   towerCount: $('#towerCount'),
 };
 
@@ -117,9 +140,12 @@ const state = {
   phase: 'ready',
   paused: false,
   speed: 1,
-  lives: 200,
-  cash: 650,
+  lives: currentMap.lives,
+  cash: currentMap.cash,
   round: 0,
+  mapId: currentMap.id,
+  sandbox: false,
+  sandboxTrack: 0,
   freeplay: false,
   towers: [],
   bloons: [],
@@ -151,20 +177,15 @@ const state = {
 const ui = {
   threatKey: '',
   toastTimeout: 0,
-  lastCash: 650,
-  lastLives: 200,
+  lastCash: currentMap.cash,
+  lastLives: currentMap.lives,
   lastRound: 0,
   modalWasPaused: false,
+  mapWasPaused: false,
+  selectedMapId: currentMap.id,
 };
 
-const TREES = [
-  { x: 65, y: 710, r: 30, size: 1.15 },
-  { x: 1145, y: 720, r: 31, size: 1.2 },
-  { x: 62, y: 88, r: 27, size: 1.0 },
-  { x: 335, y: 62, r: 28, size: 1.05 },
-  { x: 1128, y: 82, r: 28, size: 1.05 },
-  { x: 710, y: 724, r: 26, size: .95 },
-];
+let TREES = currentMap.trees;
 
 const ambientMotes = (() => {
   const random = mulberry32(91);
@@ -199,13 +220,14 @@ function toWorld(clientX, clientY) {
   };
 }
 
-function pathStroke(ctx, width, color, offsetX = 0, offsetY = 0) {
+function strokePolyline(ctx, poly, width, color, offsetX = 0, offsetY = 0) {
+  if (!poly.length) return;
   ctx.save();
   ctx.translate(offsetX, offsetY);
   ctx.beginPath();
-  ctx.moveTo(PATH_POLY[0].x, PATH_POLY[0].y);
-  for (let i = 1; i < PATH_POLY.length; i += 1) {
-    ctx.lineTo(PATH_POLY[i].x, PATH_POLY[i].y);
+  ctx.moveTo(poly[0].x, poly[0].y);
+  for (let i = 1; i < poly.length; i += 1) {
+    ctx.lineTo(poly[i].x, poly[i].y);
   }
   ctx.strokeStyle = color;
   ctx.lineWidth = width;
@@ -215,16 +237,118 @@ function pathStroke(ctx, width, color, offsetX = 0, offsetY = 0) {
   ctx.restore();
 }
 
+function pathStroke(ctx, width, color, offsetX = 0, offsetY = 0) {
+  for (const path of getPaths()) {
+    strokePolyline(ctx, path.poly, width, color, offsetX, offsetY);
+  }
+}
+
 function drawTree(ctx, tree, random) {
   const { x, y, size } = tree;
+  const palette = currentMap.theme.tree;
   const height = 74 * size;
   ctx.save();
   ctx.translate(x, y);
-  ctx.fillStyle = 'rgba(15, 42, 20, .24)';
+  ctx.fillStyle = palette.shadow;
   ctx.beginPath();
   ctx.ellipse(7, 4, 34 * size, 12 * size, 0, 0, TAU);
   ctx.fill();
-  ctx.fillStyle = '#795331';
+
+  if (currentMap.treeStyle === 'cactus') {
+    ctx.fillStyle = palette.dark;
+    ctx.beginPath();
+    ctx.roundRect(-8 * size, -height, 16 * size, height + 2, 8 * size);
+    ctx.fill();
+    ctx.fillStyle = palette.light;
+    ctx.beginPath();
+    ctx.roundRect(-5 * size, -height + 3, 5 * size, height - 8, 3 * size);
+    ctx.fill();
+    ctx.fillStyle = palette.dark;
+    ctx.beginPath();
+    ctx.roundRect(-24 * size, -height * .68, 11 * size, 10 * size, 5 * size);
+    ctx.roundRect(-24 * size, -height * .68, 8 * size, 28 * size, 4 * size);
+    ctx.roundRect(13 * size, -height * .8, 11 * size, 10 * size, 5 * size);
+    ctx.roundRect(18 * size, -height * .8, 8 * size, 32 * size, 4 * size);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,.2)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(0, -height + 8);
+    ctx.lineTo(0, -10 * size);
+    ctx.stroke();
+    ctx.fillStyle = '#ffe08a';
+    ctx.beginPath();
+    ctx.arc(0, -height - 1 * size, 3 * size, 0, TAU);
+    ctx.fill();
+    ctx.restore();
+    return;
+  }
+
+  if (currentMap.treeStyle === 'pine') {
+    ctx.fillStyle = palette.trunk;
+    ctx.fillRect(-5 * size, -height * .32, 10 * size, height * .32 + 2);
+    const layers = [
+      [-.98, 1.0], [-.78, .86], [-.57, .7], [-.36, .54],
+    ];
+    for (const [cy, width] of layers) {
+      ctx.fillStyle = palette.dark;
+      ctx.beginPath();
+      ctx.moveTo(0, cy * height - 30 * size * width);
+      ctx.lineTo(-31 * size * width, cy * height + 12 * size);
+      ctx.lineTo(31 * size * width, cy * height + 12 * size);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = palette.light;
+      ctx.beginPath();
+      ctx.moveTo(0, cy * height - 30 * size * width);
+      ctx.lineTo(-10 * size * width, cy * height + 10 * size);
+      ctx.lineTo(4 * size * width, cy * height + 10 * size);
+      ctx.closePath();
+      ctx.fill();
+      if (palette.snow) {
+        ctx.fillStyle = palette.snow;
+        ctx.beginPath();
+        ctx.moveTo(0, cy * height - 30 * size * width);
+        ctx.lineTo(-13 * size * width, cy * height - 5 * size);
+        ctx.quadraticCurveTo(0, cy * height + 3 * size, 13 * size * width, cy * height - 5 * size);
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
+    ctx.restore();
+    return;
+  }
+
+  if (currentMap.treeStyle === 'dead') {
+    ctx.strokeStyle = palette.trunk;
+    ctx.lineCap = 'round';
+    ctx.lineWidth = 9 * size;
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.quadraticCurveTo(-6 * size, -height * .5, 2 * size, -height);
+    ctx.stroke();
+    ctx.lineWidth = 4 * size;
+    ctx.beginPath();
+    ctx.moveTo(-2 * size, -height * .62);
+    ctx.lineTo(-24 * size, -height * .9);
+    ctx.moveTo(0, -height * .78);
+    ctx.lineTo(20 * size, -height * 1.02);
+    ctx.moveTo(-1 * size, -height * .46);
+    ctx.lineTo(18 * size, -height * .58);
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(255, 142, 76, .45)';
+    ctx.lineWidth = 1.6 * size;
+    ctx.beginPath();
+    ctx.moveTo(-4 * size, -height * .45);
+    ctx.lineTo(-11 * size, -height * .3);
+    ctx.moveTo(3 * size, -height * .7);
+    ctx.lineTo(10 * size, -height * .55);
+    ctx.stroke();
+    ctx.restore();
+    return;
+  }
+
+  ctx.fillStyle = palette.trunk;
   ctx.beginPath();
   ctx.moveTo(-6 * size, 0);
   ctx.quadraticCurveTo(-3 * size, -height * .55, -8 * size, -height);
@@ -239,7 +363,7 @@ function drawTree(ctx, tree, random) {
   ];
   for (const [cx, cy, cr] of clusters) {
     const radius = cr * size;
-    ctx.fillStyle = cy < -.9 ? '#2f7a3d' : '#3f9149';
+    ctx.fillStyle = cy < -.9 ? palette.dark : palette.light;
     ctx.beginPath();
     ctx.arc(cx * size, cy * height, radius, 0, TAU);
     ctx.fill();
@@ -287,10 +411,12 @@ function drawSign(ctx, x, y, label, accent, flip = false) {
 function buildBackground() {
   const bg = backgroundCanvas.getContext('2d');
   const random = mulberry32(8102);
+  const theme = currentMap.theme;
+  const paths = getPaths();
   const ground = bg.createLinearGradient(0, 0, W, H);
-  ground.addColorStop(0, '#7bb955');
-  ground.addColorStop(.45, '#65a848');
-  ground.addColorStop(1, '#54953d');
+  ground.addColorStop(0, theme.ground[0]);
+  ground.addColorStop(.45, theme.ground[1]);
+  ground.addColorStop(1, theme.ground[2]);
   bg.fillStyle = ground;
   bg.fillRect(0, 0, W, H);
 
@@ -299,7 +425,7 @@ function buildBackground() {
     const y = random() * H;
     const rx = 35 + random() * 130;
     const ry = 20 + random() * 75;
-    bg.fillStyle = random() > .45 ? 'rgba(219, 243, 143, .055)' : 'rgba(28, 92, 40, .055)';
+    bg.fillStyle = random() > .45 ? theme.patchLight : theme.patchDark;
     bg.beginPath();
     bg.ellipse(x, y, rx, ry, random() * Math.PI, 0, TAU);
     bg.fill();
@@ -309,7 +435,7 @@ function buildBackground() {
     const x = random() * W;
     const y = random() * H;
     const length = 2 + random() * 6;
-    bg.strokeStyle = random() > .55 ? 'rgba(31, 101, 40, .2)' : 'rgba(220, 249, 158, .18)';
+    bg.strokeStyle = random() > .55 ? theme.bladeDark : theme.bladeLight;
     bg.lineWidth = .8 + random() * .8;
     bg.beginPath();
     bg.moveTo(x, y);
@@ -317,12 +443,11 @@ function buildBackground() {
     bg.stroke();
   }
 
-  const flowerColors = ['#fff6c8', '#ffd643', '#ff9f7d', '#e8d6ff', '#fbfcf0'];
   for (let i = 0; i < 70; i += 1) {
     const x = 20 + random() * (W - 40);
     const y = 20 + random() * (H - 40);
-    if (distanceToPath(x, y) < 44) continue;
-    const color = flowerColors[Math.floor(random() * flowerColors.length)];
+    if (distanceToPaths(x, y) < 44) continue;
+    const color = theme.flowers[Math.floor(random() * theme.flowers.length)];
     const size = 1.3 + random() * 2.2;
     for (let petal = 0; petal < 5; petal += 1) {
       const angle = (petal / 5) * TAU + random() * .3;
@@ -331,87 +456,94 @@ function buildBackground() {
       bg.arc(x + Math.cos(angle) * size * 1.5, y + Math.sin(angle) * size * 1.5, size, 0, TAU);
       bg.fill();
     }
-    bg.fillStyle = '#e7ad2b';
+    bg.fillStyle = theme.flowerCore;
     bg.beginPath();
     bg.arc(x, y, size * .75, 0, TAU);
     bg.fill();
   }
 
-  for (let i = 0; i < 24; i += 1) {
+  for (let i = 0; i < 30; i += 1) {
     const x = 20 + random() * (W - 40);
     const y = 20 + random() * (H - 40);
-    if (distanceToPath(x, y) < 62) continue;
-    bg.fillStyle = 'rgba(80, 92, 72, .32)';
+    if (distanceToPaths(x, y) < 56) continue;
+    bg.fillStyle = theme.pebble;
     bg.beginPath();
     bg.ellipse(x, y, 3 + random() * 7, 2 + random() * 4, random() * TAU, 0, TAU);
     bg.fill();
-    bg.fillStyle = 'rgba(236, 245, 221, .12)';
+    bg.fillStyle = theme.pebbleShine;
     bg.beginPath();
     bg.ellipse(x - 1, y - 1, 2 + random() * 3, 1 + random() * 2, 0, 0, TAU);
     bg.fill();
   }
 
-  pathStroke(bg, 88, 'rgba(24, 62, 25, .28)', 0, 9);
-  pathStroke(bg, 84, '#5a7935');
-  pathStroke(bg, 78, '#8d7447');
-  pathStroke(bg, 70, '#c29d63');
-  pathStroke(bg, 61, '#d8b77e');
-  pathStroke(bg, 47, '#ecd29d');
-  pathStroke(bg, 42, 'rgba(255, 242, 201, .22)', 0, -1);
+  pathStroke(bg, 88, theme.pathShadow, 0, 9);
+  pathStroke(bg, 84, theme.pathEdge);
+  pathStroke(bg, 78, theme.pathOutline);
+  pathStroke(bg, 70, theme.pathBase);
+  pathStroke(bg, 61, theme.pathInner);
+  pathStroke(bg, 47, theme.pathCenter);
+  pathStroke(bg, 42, theme.pathLight, 0, -1);
 
-  for (let i = 0; i < 105; i += 1) {
-    const d = random() * PATH_TOTAL;
-    const p = pathPoint(d, {});
-    const side = random() > .5 ? 1 : -1;
-    const offset = side * (31 + random() * 9);
-    const x = p.x + p.nx * offset;
-    const y = p.y + p.ny * offset;
-    bg.fillStyle = random() > .5 ? 'rgba(120, 91, 48, .35)' : 'rgba(255, 239, 188, .25)';
-    bg.beginPath();
-    bg.ellipse(x, y, 1 + random() * 3, .8 + random() * 2, random() * TAU, 0, TAU);
-    bg.fill();
-  }
-
-  for (let i = 0; i < 34; i += 1) {
-    const d = random() * PATH_TOTAL;
-    const p = pathPoint(d, {});
-    const side = random() > .5 ? 1 : -1;
-    const offset = side * (39 + random() * 9);
-    bg.strokeStyle = 'rgba(58, 112, 40, .5)';
-    bg.lineWidth = 1.4;
-    bg.beginPath();
-    const x = p.x + p.nx * offset;
-    const y = p.y + p.ny * offset;
-    bg.moveTo(x, y);
-    bg.lineTo(x + (random() - .5) * 5, y - 4 - random() * 5);
-    bg.stroke();
-  }
-
-  for (let d = 150; d < PATH_TOTAL - 110; d += 185) {
-    const p = pathPoint(d, {});
-    bg.save();
-    bg.translate(p.x, p.y);
-    bg.rotate(p.angle);
-    bg.fillStyle = 'rgba(116, 84, 42, .2)';
-    for (let arrow = -1; arrow <= 1; arrow += 1) {
+  for (const path of paths) {
+    for (let i = 0; i < 105; i += 1) {
+      const d = random() * path.total;
+      const p = pathPoint(paths.indexOf(path), d, {});
+      const side = random() > .5 ? 1 : -1;
+      const offset = side * (31 + random() * 9);
+      const x = p.x + p.nx * offset;
+      const y = p.y + p.ny * offset;
+      bg.fillStyle = random() > .5 ? theme.pathGrit : theme.pathSpark;
       bg.beginPath();
-      bg.moveTo(-3 + arrow * 9, -7);
-      bg.lineTo(5 + arrow * 9, 0);
-      bg.lineTo(-3 + arrow * 9, 7);
-      bg.lineTo(0 + arrow * 9, 0);
-      bg.closePath();
+      bg.ellipse(x, y, 1 + random() * 3, .8 + random() * 2, random() * TAU, 0, TAU);
       bg.fill();
     }
-    bg.restore();
+
+    for (let i = 0; i < 34; i += 1) {
+      const d = random() * path.total;
+      const p = pathPoint(paths.indexOf(path), d, {});
+      const side = random() > .5 ? 1 : -1;
+      const offset = side * (39 + random() * 9);
+      bg.strokeStyle = theme.grassTuft;
+      bg.lineWidth = 1.4;
+      bg.beginPath();
+      const x = p.x + p.nx * offset;
+      const y = p.y + p.ny * offset;
+      bg.moveTo(x, y);
+      bg.lineTo(x + (random() - .5) * 5, y - 4 - random() * 5);
+      bg.stroke();
+    }
+
+    for (let d = 150; d < path.total - 110; d += 185) {
+      const p = pathPoint(paths.indexOf(path), d, {});
+      bg.save();
+      bg.translate(p.x, p.y);
+      bg.rotate(p.angle);
+      bg.fillStyle = theme.arrow;
+      for (let arrow = -1; arrow <= 1; arrow += 1) {
+        bg.beginPath();
+        bg.moveTo(-3 + arrow * 9, -7);
+        bg.lineTo(5 + arrow * 9, 0);
+        bg.lineTo(-3 + arrow * 9, 7);
+        bg.lineTo(0 + arrow * 9, 0);
+        bg.closePath();
+        bg.fill();
+      }
+      bg.restore();
+    }
   }
 
   for (const tree of TREES) drawTree(bg, tree, random);
-  drawSign(bg, 76, 338, 'START', '#6d3d1f');
-  drawSign(bg, 1118, 157, 'VILLAGE', '#4e6a1f', true);
+
+  paths.forEach((path, track) => {
+    const start = pathPoint(track, Math.min(path.total * .14, 145), {});
+    const finish = pathPoint(track, Math.max(0, path.total - 135), {});
+    drawSign(bg, start.x + 12, Math.max(44, start.y - 52), 'START', theme.signStart);
+    drawSign(bg, finish.x - 6, Math.max(44, finish.y - 52), 'EXIT', theme.signExit, true);
+  });
 
   const vignette = bg.createRadialGradient(W * .5, H * .48, H * .2, W * .5, H * .5, W * .72);
   vignette.addColorStop(0, 'rgba(0,0,0,0)');
-  vignette.addColorStop(1, 'rgba(4, 27, 13, .2)');
+  vignette.addColorStop(1, theme.vignette);
   bg.fillStyle = vignette;
   bg.fillRect(0, 0, W, H);
 }
@@ -1378,16 +1510,19 @@ function updateVisuals(dt) {
   state.shake = Math.max(0, state.shake - dt * 28);
 }
 
-function createBloon(type, pathDistance = 0, lane = null) {
+function createBloon(type, pathDistance = 0, lane = null, track = 0) {
   const kind = BLOONS[type];
   if (!kind) throw new Error(`Unknown bloon type: ${type}`);
+  const trackIndex = clamp(Number(track) || 0, 0, Math.max(0, getPathCount() - 1));
+  const total = getPathTotal(trackIndex);
   const b = {
     id: state.nextId++,
     type,
     kind,
+    track: trackIndex,
     hp: kind.hp,
     maxHp: kind.hp,
-    dist: clamp(pathDistance, 0, PATH_TOTAL - .1),
+    dist: clamp(pathDistance, 0, total - .1),
     lane: lane ?? (Math.random() * 2 - 1) * (kind.blimp ? 4 : 7),
     speed: kind.speed,
     x: 0,
@@ -1415,7 +1550,7 @@ function createBloon(type, pathDistance = 0, lane = null) {
 const positionScratch = {};
 
 function updateBloonPosition(b) {
-  const p = pathPoint(b.dist, positionScratch);
+  const p = pathPoint(b.track, b.dist, positionScratch);
   const lane = b.lane;
   b.groundX = p.x + p.nx * lane;
   b.groundY = p.y + p.ny * lane;
@@ -1457,6 +1592,7 @@ function destroyBloon(bloon, pending) {
         child,
         Math.max(0, bloon.dist + (Math.random() - .5) * 6),
         clamp(bloon.lane + (Math.random() - .5) * 7, -9, 9),
+        bloon.track,
       );
       childBloon.spawnScale = .35;
       pending.push(childBloon);
@@ -1500,6 +1636,7 @@ function applyFreeze(bloon, duration) {
 }
 
 function loseLives(amount, bloon) {
+  if (state.sandbox) return;
   if (state.phase !== 'active') return;
   state.lives = Math.max(0, state.lives - amount);
   state.stats.leaks += amount;
@@ -1521,10 +1658,10 @@ function loseLives(amount, bloon) {
 
 function validPlacement(x, y) {
   if (x < 30 || x > W - 30 || y < 38 || y > H - 32) {
-    return { ok: false, reason: 'Too close to the edge of the meadow.' };
+    return { ok: false, reason: 'Too close to the edge of the map.' };
   }
-  if (distanceToPath(x, y) < 55) {
-    return { ok: false, reason: 'The bloons need that path clear.' };
+  if (distanceToPaths(x, y) < 55) {
+    return { ok: false, reason: 'The bloons need that track clear.' };
   }
   for (const tower of state.towers) {
     if (distance(x, y, tower.x, tower.y) < 47) {
@@ -1533,7 +1670,7 @@ function validPlacement(x, y) {
   }
   for (const tree of TREES) {
     if (distance(x, y, tree.x, tree.y) < tree.r + 24) {
-      return { ok: false, reason: 'That tree is already occupied.' };
+      return { ok: false, reason: 'That landmark is already occupied.' };
     }
   }
   return { ok: true, reason: '' };
@@ -1548,12 +1685,13 @@ function chooseTarget(tower) {
     const d = distance(tower.x, tower.y - 18, bloon.x, bloon.y);
     if (!def.global && d > tower.range + bloon.kind.size * .4) continue;
     let score;
+    const progress = bloon.dist / Math.max(1, getPathTotal(bloon.track));
     switch (tower.targetMode) {
-      case 'last': score = -bloon.dist; break;
+      case 'last': score = -progress; break;
       case 'close': score = -d; break;
       case 'strong': score = bloon.kind.rbe + bloon.hp * .2; break;
       case 'first':
-      default: score = bloon.dist; break;
+      default: score = progress; break;
     }
     if (score > bestScore) {
       bestScore = score;
@@ -1770,7 +1908,7 @@ function updateSpawnQueue(dt) {
   state.spawnElapsed += dt;
   while (state.spawnQueue.length && state.spawnQueue[0].time <= state.spawnElapsed) {
     const entry = state.spawnQueue.shift();
-    createBloon(entry.type, 0, entry.lane ?? (Math.random() * 2 - 1) * (BLOONS[entry.type].blimp ? 3 : 7));
+    createBloon(entry.type, 0, entry.lane ?? (Math.random() * 2 - 1) * (BLOONS[entry.type].blimp ? 3 : 7), entry.track ?? 0);
     state.waveSpawned += 1;
   }
 }
@@ -1803,9 +1941,10 @@ function updateBloons(dt) {
 
     const slow = bloon.slowTimer > 0 ? bloon.slowMul : 1;
     bloon.dist += bloon.speed * slow * dt;
-    if (bloon.dist >= PATH_TOTAL) {
+    const total = getPathTotal(bloon.track);
+    if (bloon.dist >= total) {
       bloon.leaked = true;
-      const p = pathPoint(PATH_TOTAL - 2, {});
+      const p = pathPoint(bloon.track, total - 2, {});
       addBurst(p.x, p.y, bloon.kind.color, bloon.kind.blimp ? 16 : 5, { speed: 65, size: 2.5, life: .5 });
       loseLives(bloon.kind.leak, bloon);
       continue;
@@ -1939,7 +2078,7 @@ function simulate(dt) {
   updateVisuals(dt);
 
   state.bloons = state.bloons.filter((bloon) => !bloon.dead && !bloon.leaked);
-  if (state.phase === 'active' && state.spawnQueue.length === 0 && state.bloons.length === 0) {
+  if (!state.sandbox && state.phase === 'active' && state.spawnQueue.length === 0 && state.bloons.length === 0) {
     completeWave();
   }
 }
@@ -1954,18 +2093,23 @@ function waveBanner(groups) {
 }
 
 function beginWave() {
+  if (state.sandbox) return;
   if (state.paused) return;
   if (state.phase !== 'ready' && state.phase !== 'between') return;
   if (state.round >= TOTAL_ROUNDS && !state.freeplay) return;
   state.round += 1;
   const wave = getWave(state.round);
+  const trackCount = Math.max(1, getPathCount());
   const queue = [];
+  let spawnIndex = 0;
   for (const group of wave.groups) {
     for (let i = 0; i < group.count; i += 1) {
       queue.push({
         type: group.type,
         time: group.delay + i * group.gap + .45,
+        track: spawnIndex % trackCount,
       });
+      spawnIndex += 1;
     }
   }
   queue.sort((a, b) => a.time - b.time);
@@ -2007,7 +2151,7 @@ function completeWave() {
   if (clearedRound >= TOTAL_ROUNDS && !state.freeplay) {
     state.phase = 'victory';
     state.selectedTower = null;
-    showBanner('Meadow defended', 'Victory!');
+    showBanner(`${currentMap.name} defended`, 'Victory!');
     sound.victory();
     addRing(W / 2, H / 2, 380, '#e8ff8c', { life: 1.1, width: 5 });
     window.setTimeout(() => showResult(true), 900);
@@ -2148,7 +2292,7 @@ function placeTower(x, y) {
   addRing(x, y, 34, '#d9ff86', { life: .4, width: 2 });
   addBurst(x, y - 12, '#ddff88', 8, { speed: 55, size: 2, life: .5, gravity: 60 });
   sound.build();
-  showToast(`${def.name} is on the meadow!`, 'good');
+  showToast(`${def.name} is on ${currentMap.name}!`, 'good');
   state.selectedType = null;
   dom.buildHint.hidden = true;
   updateShopSelection();
@@ -2331,6 +2475,13 @@ function updateStartButton() {
   const small = dom.startBtn.querySelector('.start-copy small');
   const strong = dom.startBtn.querySelector('.start-copy strong');
   const alive = state.bloons.length + state.spawnQueue.length;
+  if (state.sandbox) {
+    small.textContent = 'Sandbox mode';
+    strong.textContent = 'Spawn bloons below';
+    dom.startBtn.disabled = true;
+    dom.startBtn.classList.remove('is-countdown');
+    return;
+  }
   dom.startBtn.classList.toggle('is-countdown', state.phase === 'between' && state.autoTimer > 0);
   if (state.phase === 'ready') {
     small.textContent = 'Build a little, then go';
@@ -2352,7 +2503,7 @@ function updateStartButton() {
     dom.startBtn.disabled = false;
   } else if (state.phase === 'victory') {
     small.textContent = 'All 50 waves cleared';
-    strong.textContent = 'Meadow defended';
+    strong.textContent = `${currentMap.name} defended`;
     dom.startBtn.disabled = true;
   } else {
     small.textContent = 'The village is overrun';
@@ -2362,6 +2513,24 @@ function updateStartButton() {
 }
 
 function updateThreatPanel() {
+  if (state.sandbox) {
+    const alive = state.bloons.length;
+    const counts = new Map();
+    for (const bloon of state.bloons) counts.set(bloon.type, (counts.get(bloon.type) || 0) + 1);
+    const entries = [...counts.entries()].sort((a, b) => BLOON_ORDER.indexOf(b[0]) - BLOON_ORDER.indexOf(a[0]));
+    dom.nextWaveValue.textContent = '∞';
+    dom.waveEyebrow.textContent = 'Sandbox';
+    dom.difficultyPill.textContent = 'Sandbox';
+    dom.difficultyPill.className = 'difficulty-pill is-sandbox';
+    dom.threatBloons.innerHTML = entries.slice(0, 5).map(([type]) => {
+      const kind = BLOONS[type];
+      return `<span class="threat-bloon ${kind.blimp ? 'is-blimp' : ''}" style="--bloon-color:${kind.color}" title="${kind.name}"></span>`;
+    }).join('') || '<span class="threat-bloon" style="--bloon-color:#c8f53e" title="Lab clear"></span>';
+    dom.threatTitle.textContent = alive ? `${alive} bloon${alive === 1 ? '' : 's'} loose` : 'Sandbox lab';
+    dom.threatSub.textContent = `${currentMap.tracks.length} tracks · unlimited cash`;
+    ui.threatKey = `sandbox-${alive}-${entries.map((entry) => entry[0]).join('')}`;
+    return;
+  }
   let displayRound = state.phase === 'between' || state.phase === 'ready'
     ? state.round + 1
     : state.round;
@@ -2376,9 +2545,9 @@ function updateThreatPanel() {
     dom.difficultyPill.textContent = 'Cleared';
     dom.difficultyPill.className = 'difficulty-pill';
     dom.threatBloons.innerHTML = '<span class="threat-bloon" style="--bloon-color:#c8f53e" title="All clear"></span>';
-    dom.threatTitle.textContent = 'Meadow secured';
+    dom.threatTitle.textContent = `${currentMap.name} secured`;
     dom.threatSub.textContent = 'Every bloon has been popped.';
-    dom.waveEyebrow.textContent = 'Meadow secured';
+    dom.waveEyebrow.textContent = `${currentMap.name} secured`;
     ui.threatKey = `${state.phase}-${state.round}-${state.freeplay}`;
     return;
   }
@@ -2388,7 +2557,7 @@ function updateThreatPanel() {
   dom.difficultyPill.className = `difficulty-pill ${difficulty.className}`;
 
   if (state.phase === 'active') dom.waveEyebrow.textContent = `Wave ${state.round} active`;
-  else if (state.phase === 'victory') dom.waveEyebrow.textContent = 'Meadow secured';
+  else if (state.phase === 'victory') dom.waveEyebrow.textContent = `${currentMap.name} secured`;
   else if (state.phase === 'defeat') dom.waveEyebrow.textContent = 'Overrun';
   else dom.waveEyebrow.textContent = displayRound === 1 ? 'Get ready' : 'Next wave';
 
@@ -2405,7 +2574,7 @@ function updateThreatPanel() {
 
   if (entries.length === 0) {
     dom.threatTitle.textContent = 'No bloons detected';
-    dom.threatSub.textContent = 'The meadow is quiet... for now.';
+    dom.threatSub.textContent = 'The map is quiet... for now.';
   } else {
     const hasBfb = threat.counts.some(([type]) => type === 'bfb');
     const hasMoab = threat.counts.some(([type]) => type === 'moab');
@@ -2431,8 +2600,13 @@ function updateUI(now, force = false) {
   const cash = Math.floor(state.cash);
   if (dom.lives.textContent !== String(lives)) dom.lives.textContent = String(lives);
   if (dom.cash.textContent !== formatNumber(cash)) dom.cash.textContent = formatNumber(cash);
-  if (dom.round.textContent !== String(state.round)) dom.round.textContent = String(state.round);
-  dom.roundTotal.textContent = state.freeplay ? '/∞' : `/${TOTAL_ROUNDS}`;
+  if (state.sandbox) {
+    dom.round.textContent = '∞';
+    dom.roundTotal.textContent = '';
+  } else {
+    if (dom.round.textContent !== String(state.round)) dom.round.textContent = String(state.round);
+    dom.roundTotal.textContent = state.freeplay ? '/∞' : `/${TOTAL_ROUNDS}`;
+  }
   dom.waveTotal.textContent = state.freeplay ? '/ ∞' : `/ ${TOTAL_ROUNDS}`;
   dom.best.textContent = settings.best
     ? `${settings.best} / ${state.freeplay || settings.best > TOTAL_ROUNDS ? '∞' : TOTAL_ROUNDS}`
@@ -2451,7 +2625,10 @@ function updateUI(now, force = false) {
   if (key !== ui.threatKey) updateThreatPanel();
 
   const alive = state.bloons.length + state.spawnQueue.length;
-  if (state.phase === 'active') {
+  if (state.sandbox) {
+    dom.waveState.textContent = `${state.bloons.length} bloons in the lab`;
+    dom.waveProgressBar.style.width = '0%';
+  } else if (state.phase === 'active') {
     dom.waveState.textContent = `${alive} bloon${alive === 1 ? '' : 's'} left`;
     const fraction = state.waveTotal ? state.waveSpawned / state.waveTotal : 0;
     dom.waveProgressBar.style.width = `${Math.min(100, fraction * 100)}%`;
@@ -2523,10 +2700,10 @@ function closeHelp() {
 function showResult(victory) {
   if (state.resultShown) return;
   state.resultShown = true;
-  dom.resultKicker.textContent = victory ? 'Meadow defended' : 'The village is overrun';
+  dom.resultKicker.textContent = victory ? `${currentMap.name} defended` : 'The village is overrun';
   dom.resultTitle.textContent = victory ? 'Victory!' : 'Bloons win this one.';
   dom.resultText.textContent = victory
-    ? 'Fifty waves, one very tired crew, and not a single bloon left to pop. Monkey Meadow is safe.'
+    ? `Fifty waves, one very tired crew, and not a single bloon left to pop. ${currentMap.name} is safe.`
     : 'The bloons broke through. Rebuild your defense, mix up your towers, and give them another go.';
   dom.resultEmblem.innerHTML = `<svg><use href="${victory ? '#i-trophy' : '#i-bloon'}"/></svg>`;
   dom.resultEmblem.style.background = victory
@@ -2547,7 +2724,7 @@ function drawAmbient(ctx, time) {
     const y = mote.y + Math.sin(time * .7 + mote.phase) * 7;
     const alpha = .08 + (Math.sin(time * 1.4 + mote.phase) * .5 + .5) * .2;
     ctx.globalAlpha = alpha;
-    ctx.fillStyle = '#f6ffb0';
+    ctx.fillStyle = currentMap.theme.mote;
     ctx.beginPath();
     ctx.arc(x, y, mote.size, 0, TAU);
     ctx.fill();
@@ -2650,7 +2827,7 @@ function drawParticles(ctx) {
 function drawBoardBackdrop(ctx) {
   const dpr = view.dpr;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.fillStyle = '#08251a';
+  ctx.fillStyle = currentMap.theme.frame;
   ctx.fillRect(0, 0, view.width, view.height);
 
   const coverScale = Math.max(view.width / W, view.height / H);
@@ -2827,9 +3004,12 @@ function resetGame() {
     phase: 'ready',
     paused: false,
     speed: 1,
-    lives: 200,
-    cash: 650,
+    lives: currentMap.lives,
+    cash: currentMap.cash,
     round: 0,
+    mapId: currentMap.id,
+    sandbox: false,
+    sandboxTrack: 0,
     freeplay: false,
     towers: [],
     bloons: [],
@@ -2858,6 +3038,11 @@ function resetGame() {
   ui.lastRound = 0;
   dom.pauseScreen.hidden = true;
   dom.buildHint.hidden = true;
+  dom.sandboxBar.hidden = true;
+  dom.boardCta.hidden = false;
+  dom.board.classList.remove('is-sandbox');
+  dom.sandboxBtn.classList.remove('is-on');
+  dom.sandboxBtn.setAttribute('aria-pressed', 'false');
   dom.toast.classList.remove('is-visible');
   dom.banner.classList.remove('is-visible');
   dom.boardTip.textContent = 'Choose a tower from the crew, then tap the grass to build.';
@@ -2878,7 +3063,204 @@ function continueFreeplay() {
   state.autoTimer = settings.autoStart ? 6.5 : 0;
   state.resultShown = false;
   updateUI(performance.now(), true);
-  showToast('Freeplay unlocked — see how long Monkey Meadow can hold.', 'good');
+  showToast(`Freeplay unlocked — see how long ${currentMap.name} can hold.`, 'good');
+}
+
+function previewPathData(anchors) {
+  const { poly } = createPath(anchors, 3);
+  let d = '';
+  poly.forEach((point, index) => {
+    d += `${index === 0 ? 'M' : 'L'}${point.x.toFixed(1)} ${point.y.toFixed(1)}`;
+  });
+  return d;
+}
+
+function mapCardMarkup(id) {
+  const map = MAPS[id];
+  const difficulty = MAP_DIFFICULTIES[map.difficulty];
+  const theme = map.theme;
+  const trackWord = `${map.tracks.length} track${map.tracks.length === 1 ? '' : 's'}`;
+  const previewPaths = map.tracks.map((anchors) => {
+    const d = previewPathData(anchors);
+    return `<path d="${d}" fill="none" stroke="${theme.pathShadow}" stroke-width="96" stroke-linecap="round" stroke-linejoin="round" transform="translate(0 9)"/>`
+      + `<path d="${d}" fill="none" stroke="${theme.pathEdge}" stroke-width="86" stroke-linecap="round" stroke-linejoin="round"/>`
+      + `<path d="${d}" fill="none" stroke="${theme.pathOutline}" stroke-width="76" stroke-linecap="round" stroke-linejoin="round"/>`
+      + `<path d="${d}" fill="none" stroke="${theme.pathBase}" stroke-width="66" stroke-linecap="round" stroke-linejoin="round"/>`
+      + `<path d="${d}" fill="none" stroke="${theme.pathCenter}" stroke-width="42" stroke-linecap="round" stroke-linejoin="round"/>`;
+  }).join('');
+  return `
+    <button class="map-card ${id === ui.selectedMapId ? 'is-selected' : ''}" data-map="${id}" type="button" aria-pressed="${id === ui.selectedMapId}">
+      <span class="map-preview-wrap">
+        <svg class="map-preview" viewBox="0 0 1200 760" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+          <defs>
+            <linearGradient id="map-grad-${id}" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="${theme.ground[0]}"/>
+              <stop offset=".55" stop-color="${theme.ground[1]}"/>
+              <stop offset="1" stop-color="${theme.ground[2]}"/>
+            </linearGradient>
+          </defs>
+          <rect width="1200" height="760" fill="url(#map-grad-${id})"/>
+          <circle cx="160" cy="650" r="150" fill="${theme.patchLight}"/>
+          <circle cx="990" cy="120" r="170" fill="${theme.patchLight}"/>
+          ${previewPaths}
+        </svg>
+        <span class="map-chip ${difficulty.className}">${difficulty.label}</span>
+        <span class="map-track-count">${trackWord}</span>
+        ${id === currentMap.id ? '<span class="map-current">Current</span>' : ''}
+      </span>
+      <span class="map-card-body">
+        <strong>${map.name}</strong>
+        <small>${map.description}</small>
+        <span class="map-card-meta">
+          <span><svg><use href="#i-heart"/></svg>${map.lives} lives</span>
+          <span><svg><use href="#i-banana"/></svg>$${formatNumber(map.cash)}</span>
+        </span>
+      </span>
+    </button>`;
+}
+
+function syncMapSelection() {
+  const map = getMap(ui.selectedMapId);
+  const difficulty = MAP_DIFFICULTIES[map.difficulty];
+  for (const card of dom.mapGrid.querySelectorAll('.map-card')) {
+    const selected = card.dataset.map === map.id;
+    card.classList.toggle('is-selected', selected);
+    card.setAttribute('aria-pressed', String(selected));
+  }
+  dom.mapSelectionNote.textContent = `${map.name} · ${difficulty.label} · ${map.tracks.length} track${map.tracks.length === 1 ? '' : 's'} · ${map.lives} lives · $${formatNumber(map.cash)} start. Starting a map begins a fresh run.`;
+  dom.mapStartLabel.textContent = map.id === currentMap.id ? 'Restart this map' : `Start ${map.name}`;
+}
+
+function renderMapCards() {
+  if (!dom.mapGrid) return;
+  dom.mapGrid.innerHTML = MAP_ORDER.map(mapCardMarkup).join('');
+  syncMapSelection();
+}
+
+function openMapPicker() {
+  if (dom.mapDialog.open) return;
+  ui.mapWasPaused = state.paused;
+  if ((state.phase === 'active' || state.phase === 'between' || state.phase === 'sandbox') && !state.paused) {
+    setPaused(true);
+  }
+  ui.selectedMapId = currentMap.id;
+  renderMapCards();
+  dom.mapDialog.showModal();
+}
+
+function closeMapPicker(restorePause = true) {
+  if (!dom.mapDialog.open) return;
+  dom.mapDialog.close();
+  if (restorePause && !ui.mapWasPaused
+    && (state.phase === 'active' || state.phase === 'between' || state.phase === 'sandbox')
+    && state.paused) {
+    setPaused(false);
+  }
+}
+
+function updateMapLabels() {
+  const difficulty = MAP_DIFFICULTIES[currentMap.difficulty];
+  const trackWord = `${currentMap.tracks.length} track${currentMap.tracks.length === 1 ? '' : 's'}`;
+  dom.mapName.textContent = currentMap.name;
+  dom.mapDifficulty.textContent = `${difficulty.label} · ${trackWord}`;
+  dom.brandMapName.textContent = currentMap.name;
+  dom.pauseTitle.textContent = `${currentMap.name} paused`;
+  dom.pauseCopy.textContent = `The ${currentMap.name} bloons can wait. Take a breath.`;
+  document.title = `Bloon Blitz TD — ${currentMap.name}`;
+  canvas.setAttribute('aria-label', `${currentMap.name} game board`);
+}
+
+function applySelectedMap() {
+  const map = getMap(ui.selectedMapId);
+  closeMapPicker(false);
+  if (dom.resultDialog.open) dom.resultDialog.close();
+  settings.map = map.id;
+  saveSettings();
+  currentMap = map;
+  TREES = currentMap.trees;
+  setPaths(currentMap.tracks);
+  state.mapId = map.id;
+  buildBackground();
+  updateMapLabels();
+  renderMapCards();
+  resetGame();
+  showToast(`Fresh run on ${map.name} — ${map.tracks.length} track${map.tracks.length === 1 ? '' : 's'} and $${formatNumber(map.cash)} to spend.`, 'good');
+}
+
+function buildSandboxButtons() {
+  dom.sandboxBloons.innerHTML = BLOON_ORDER.map((type) => {
+    const kind = BLOONS[type];
+    const track = kind.blimp ? 'is-blimp' : '';
+    return `<button class="sandbox-bloon ${track}" data-bloon="${type}" type="button" title="Spawn a ${kind.name}" style="--bloon-color:${kind.color}">
+      <span class="sandbox-bloon-dot"></span><span>${kind.name}</span>
+    </button>`;
+  }).join('');
+}
+
+function enterSandbox() {
+  if (state.sandbox) return;
+  resetGame();
+  Object.assign(state, {
+    phase: 'sandbox',
+    paused: false,
+    lives: 9999,
+    cash: 50000,
+    round: 0,
+    sandbox: true,
+    sandboxTrack: 0,
+    freeplay: false,
+    selectedType: null,
+    selectedTower: null,
+    bloons: [],
+    projectiles: [],
+    particles: [],
+    effects: [],
+    spawnQueue: [],
+    spawnElapsed: 0,
+    resultShown: false,
+  });
+  dom.sandboxBar.hidden = false;
+  dom.boardCta.hidden = true;
+  dom.board.classList.add('is-sandbox');
+  dom.sandboxBtn.classList.add('is-on');
+  dom.sandboxBtn.setAttribute('aria-pressed', 'true');
+  dom.boardTip.textContent = 'Sandbox: spawn bloons, build every monkey, and test upgrades. Nothing can cost you lives.';
+  dom.boardTip.classList.remove('is-hidden');
+  updateUI(performance.now(), true);
+  showToast('Sandbox mode — unlimited cash and every bloon on tap. Have fun.', 'good');
+}
+
+function exitSandbox() {
+  if (!state.sandbox) return;
+  state.sandbox = false;
+  resetGame();
+  showToast('Sandbox closed. Back to a real run.', '');
+}
+
+function toggleSandbox() {
+  if (state.sandbox) exitSandbox();
+  else enterSandbox();
+}
+
+function spawnSandboxBloon(type) {
+  if (!state.sandbox || !BLOONS[type]) return;
+  const trackCount = Math.max(1, getPathCount());
+  const track = state.sandboxTrack % trackCount;
+  state.sandboxTrack = (state.sandboxTrack + 1) % trackCount;
+  const lane = (Math.random() * 2 - 1) * (BLOONS[type].blimp ? 3 : 7);
+  createBloon(type, 0, lane, track);
+  sound.pop(type === 'ceramic' || type === 'rainbow');
+  updateUI(performance.now(), true);
+}
+
+function clearSandbox() {
+  if (!state.sandbox) return;
+  state.bloons = [];
+  state.projectiles = [];
+  state.particles = [];
+  state.effects = [];
+  updateUI(performance.now(), true);
+  showToast('Sandbox cleared.', '');
 }
 
 function bindEvents() {
@@ -2900,6 +3282,36 @@ function bindEvents() {
   dom.resumeBtn.addEventListener('click', () => setPaused(false));
   dom.soundBtn.addEventListener('click', toggleSound);
   dom.helpBtn.addEventListener('click', openHelp);
+  dom.sandboxBtn.addEventListener('click', toggleSandbox);
+  dom.mapBtn.addEventListener('click', openMapPicker);
+  dom.mapClose.addEventListener('click', () => closeMapPicker());
+  dom.mapDialog.addEventListener('cancel', (event) => {
+    event.preventDefault();
+    closeMapPicker();
+  });
+  dom.mapDialog.addEventListener('click', (event) => {
+    if (event.target === dom.mapDialog) closeMapPicker();
+  });
+  dom.mapGrid.addEventListener('click', (event) => {
+    const card = event.target.closest('.map-card');
+    if (!card) return;
+    ui.selectedMapId = card.dataset.map;
+    syncMapSelection();
+    sound.click();
+  });
+  dom.mapStartBtn.addEventListener('click', applySelectedMap);
+  dom.sandboxBloons.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-bloon]');
+    if (button) spawnSandboxBloon(button.dataset.bloon);
+  });
+  dom.sandboxCash.addEventListener('click', () => {
+    if (!state.sandbox) return;
+    state.cash += 5000;
+    sound.cash();
+    updateUI(performance.now(), true);
+  });
+  dom.sandboxClear.addEventListener('click', clearSandbox);
+  dom.sandboxExit.addEventListener('click', exitSandbox);
   dom.helpClose.addEventListener('click', closeHelp);
   dom.helpPlay.addEventListener('click', closeHelp);
   dom.helpDialog.addEventListener('cancel', (event) => {
@@ -2968,7 +3380,7 @@ function bindEvents() {
   canvas.addEventListener('contextmenu', (event) => event.preventDefault());
 
   window.addEventListener('keydown', (event) => {
-    if (dom.helpDialog.open || dom.resultDialog.open) return;
+    if (dom.helpDialog.open || dom.resultDialog.open || dom.mapDialog.open) return;
     if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
     if (event.key >= '1' && event.key <= '9') {
       const index = Number(event.key) - 1;
@@ -3019,9 +3431,9 @@ function frame(now) {
   state.visualTime += raw;
 
   if (!state.paused) {
-    if (state.phase === 'active') {
+    if (state.phase === 'active' || state.phase === 'sandbox') {
       let remaining = raw * state.speed;
-      while (remaining > 0 && state.phase === 'active') {
+      while (remaining > 0 && (state.phase === 'active' || state.phase === 'sandbox')) {
         const step = Math.min(1 / 45, remaining);
         simulate(step);
         remaining -= step;
@@ -3041,7 +3453,9 @@ function frame(now) {
 
 function init() {
   resizeCanvas();
+  updateMapLabels();
   buildBackground();
+  buildSandboxButtons();
   buildShop();
   bindEvents();
   syncSidebar();
@@ -3050,7 +3464,7 @@ function init() {
   updateUI(performance.now(), true);
   window.setTimeout(() => {
     if (state.round === 0 && state.towers.length === 0) {
-      showToast('Welcome to Monkey Meadow — pick a tower, then tap the grass to build.', 'good');
+      showToast(`Welcome to ${currentMap.name} — pick a tower, then tap the grass to build.`, 'good');
     }
   }, 650);
   requestAnimationFrame((now) => {
@@ -3074,6 +3488,18 @@ window.__bloonBlitz = {
   getWave,
   TOWERS,
   BLOONS,
+  MAPS,
+  MAP_ORDER,
+  getMap,
+  setMap: (id) => { ui.selectedMapId = id; applySelectedMap(); },
+  openMapPicker,
+  enterSandbox,
+  exitSandbox,
+  spawnSandboxBloon,
+  clearSandbox,
+  getPathCount,
+  getPathTotal,
+  pathPoint,
 };
 
 init();

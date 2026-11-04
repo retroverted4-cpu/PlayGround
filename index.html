@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#102b1b">
+  <meta name="description" content="Bloons TD 5 — a lush, hand-drawn tower defense game. Place monkeys, pop bloons, and survive 30 rounds.">
+  <title>Bloons TD 5 — Sunset Grove</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app">
+    <header class="hud">
+      <div class="brand" aria-label="Bloons TD 5">
+        <span class="brand-b">BLOONS</span>
+        <span class="brand-td">TD</span>
+        <span class="brand-five">5</span>
+        <span class="brand-map">SUNSET GROVE</span>
+      </div>
+
+      <div class="stats" role="group" aria-label="Game statistics">
+        <div class="stat stat-lives">
+          <span class="stat-icon" aria-hidden="true">
+            <svg viewBox="0 0 32 32"><path d="M16 28S3.8 20.2 3.8 11.6C3.8 7.4 7 4.5 10.7 4.5c2.3 0 4.2 1.1 5.3 2.9 1.1-1.8 3-2.9 5.3-2.9 3.7 0 6.9 2.9 6.9 7.1C28.2 20.2 16 28 16 28Z"/></svg>
+          </span>
+          <span class="stat-copy"><b id="livesValue">200</b><small>LIVES</small></span>
+        </div>
+        <div class="stat stat-cash">
+          <span class="stat-icon coin" aria-hidden="true">$</span>
+          <span class="stat-copy"><b id="cashValue">1800</b><small>CASH</small></span>
+        </div>
+        <div class="stat stat-wave">
+          <span class="stat-icon balloon-mini" aria-hidden="true"></span>
+          <span class="stat-copy"><b id="waveValue">0<em>/30</em></b><small>ROUND</small></span>
+        </div>
+        <div class="stat stat-score">
+          <span class="stat-copy"><b id="scoreValue">0</b><small>SCORE</small></span>
+        </div>
+      </div>
+
+      <div class="hud-actions">
+        <button class="hud-btn speed-btn" id="speedBtn" title="Game speed (F)" aria-label="Change game speed"><span id="speedLabel">1×</span></button>
+        <button class="hud-btn icon-btn" id="pauseBtn" title="Pause (P)" aria-label="Pause game">
+          <svg class="pause-icon" viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg>
+          <svg class="play-icon" viewBox="0 0 24 24"><path d="M8 4.8v14.4L20 12 8 4.8Z"/></svg>
+        </button>
+        <button class="hud-btn icon-btn" id="soundBtn" title="Mute (M)" aria-label="Toggle sound">
+          <svg class="sound-on" viewBox="0 0 24 24"><path d="M4 9v6h4l5 4V5L8 9H4Z"/><path d="M16 8.3a5 5 0 0 1 0 7.4M18.5 5.5a9 9 0 0 1 0 13"/></svg>
+          <svg class="sound-off" viewBox="0 0 24 24"><path d="M4 9v6h4l5 4V5L8 9H4Z"/><path d="m16 9 5 6m0-6-5 6"/></svg>
+        </button>
+        <button class="hud-btn icon-btn help-btn" id="helpBtn" title="How to play" aria-label="How to play">?</button>
+      </div>
+    </header>
+
+    <main id="stage" aria-label="Sunset Grove battlefield">
+      <canvas id="game" aria-label="Game board. Select a monkey from the shop, then place it on the grass."></canvas>
+
+      <div class="round-banner" id="roundBanner" aria-live="polite">
+        <span class="banner-kicker" id="bannerKicker">ROUND 1</span>
+        <strong id="bannerTitle">Red bloons incoming!</strong>
+        <span id="bannerSub">The grove needs a hero.</span>
+      </div>
+
+      <div class="toast" id="toast" aria-live="polite"><span id="toastText">Welcome to Sunset Grove!</span></div>
+
+      <div class="coach" id="coach">
+        <span class="coach-icon" aria-hidden="true">☝</span>
+        <span><b>Build your defense!</b> Pick a monkey below, then tap the grass near the track.</span>
+        <button id="coachClose" aria-label="Dismiss tip">×</button>
+      </div>
+
+      <div class="placement-bar" id="placementBar">
+        <span class="placement-dot"></span>
+        <span id="placementText">Tap the grass to place your monkey</span>
+        <button id="cancelPlacement">Cancel <kbd>Esc</kbd></button>
+      </div>
+
+      <div class="boss-warning" id="bossWarning" aria-live="assertive">
+        <span class="boss-stripes"></span>
+        <span><b>MOAB INCOMING</b><small>Focus your fire!</small></span>
+        <span class="boss-stripes"></span>
+      </div>
+
+      <aside class="inspector" id="towerPanel" aria-label="Selected tower">
+        <div class="inspector-head">
+          <canvas id="inspectorIcon" width="144" height="144" aria-hidden="true"></canvas>
+          <div class="inspector-title">
+            <h2 id="towerName">Dart Monkey</h2>
+            <div class="level-line"><span id="towerLevel">Level 1</span><span class="pips" id="towerPips"><i></i><i></i><i></i></span></div>
+          </div>
+          <button id="inspectorClose" aria-label="Close tower panel">×</button>
+        </div>
+        <p class="inspector-desc" id="towerDesc">Balanced all-rounder.</p>
+        <button class="upgrade-btn" id="upgradeBtn">
+          <span class="upgrade-icon" aria-hidden="true">▲</span>
+          <span class="upgrade-copy"><b id="upgradeName">Sharp Shots</b><small id="upgradeDesc">Pops bloons with sharper darts.</small></span>
+          <span class="upgrade-cost" id="upgradeCost">$140</span>
+        </button>
+        <div class="inspector-actions">
+          <button id="targetBtn" class="small-btn"><span>Target</span><b>First</b></button>
+          <button id="sellBtn" class="small-btn sell-btn"><span>Sell</span><b id="sellValue">$140</b></button>
+        </div>
+      </aside>
+
+      <div class="pause-overlay" id="pauseOverlay">
+        <div class="pause-card">
+          <span class="pause-kicker">TAKE A BREATH</span>
+          <h2>PAUSED</h2>
+          <p>The bloons are holding still. Barely.</p>
+          <button class="big-button" id="resumeBtn">Resume <kbd>P</kbd></button>
+        </div>
+      </div>
+
+      <div class="end-overlay" id="endOverlay">
+        <div class="end-card">
+          <div class="end-rays" aria-hidden="true"></div>
+          <span class="end-kicker" id="endKicker">SUNSET GROVE SURVIVES</span>
+          <h2 id="endTitle">VICTORY!</h2>
+          <p id="endSub">Every last bloon has been popped.</p>
+          <div class="end-stats">
+            <div><b id="endRounds">30</b><small>ROUNDS</small></div>
+            <div><b id="endPops">0</b><small>BLOONS POPPED</small></div>
+            <div><b id="endScore">0</b><small>SCORE</small></div>
+          </div>
+          <button class="big-button gold-button" id="playAgainBtn">Play again</button>
+        </div>
+      </div>
+
+      <div class="help-overlay" id="helpOverlay">
+        <div class="help-card">
+          <button class="help-close" id="helpClose" aria-label="Close help">×</button>
+          <span class="help-kicker">FIELD GUIDE</span>
+          <h2>How to play</h2>
+          <div class="help-grid">
+            <div><span class="help-number">1</span><b>Pick a monkey</b><p>Choose a defender from the shop, then place it on open grass near the path.</p></div>
+            <div><span class="help-number">2</span><b>Pop the bloons</b><p>Every bloon pops into smaller, faster bloons. Don't let them reach the exit!</p></div>
+            <div><span class="help-number">3</span><b>Upgrade & adapt</b><p>Tap a placed monkey to upgrade it, change its target priority, or sell it back.</p></div>
+          </div>
+          <div class="help-keys">
+            <span><kbd>1</kbd>–<kbd>9</kbd> Pick monkey</span>
+            <span><kbd>Space</kbd> Start round</span>
+            <span><kbd>P</kbd> Pause</span>
+            <span><kbd>F</kbd> Speed</span>
+            <span><kbd>M</kbd> Mute</span>
+            <span><kbd>Esc</kbd> Cancel</span>
+          </div>
+          <button class="big-button" id="helpStart">Let's defend</button>
+        </div>
+      </div>
+    </main>
+
+    <footer class="dock">
+      <div class="shop-shell">
+        <div class="shop-heading">
+          <span>MONKEY SHOP</span>
+          <small>Tap a card, then place on grass</small>
+        </div>
+        <div class="tower-shop" id="towerShop" role="toolbar" aria-label="Monkey shop"></div>
+      </div>
+
+      <div class="round-console">
+        <div class="round-readout">
+          <span class="round-eyebrow" id="roundEyebrow">NEXT ROUND</span>
+          <strong id="roundNumber">1 <em>/ 30</em></strong>
+          <span id="roundSub">10 red bloons</span>
+        </div>
+        <div class="launch-row">
+          <button id="startBtn" class="start-btn">
+            <span class="start-play" aria-hidden="true">▶</span>
+            <span class="start-copy"><b id="startLabel">Start Round</b><small id="startHint">Space</small></span>
+          </button>
+          <button class="auto-btn" id="autoBtn" aria-pressed="false" title="Automatically start the next round">
+            <span class="auto-dot"></span>
+            <span><b>AUTO</b><small>Next wave</small></span>
+          </button>
+        </div>
+        <div class="wave-track" aria-hidden="true"><span id="waveProgress"></span></div>
+      </div>
+    </footer>
+  </div>
+
+  <script src="data.js"></script>
+  <script src="audio.js"></script>
+  <script src="art.js"></script>
+  <script src="world.js"></script>
+  <script src="track.js"></script>
+  <script src="entities.js"></script>
+  <script src="engine.js"></script>
+  <script src="render.js"></script>
+  <script src="main.js"></script>
+</body>
+</html>
